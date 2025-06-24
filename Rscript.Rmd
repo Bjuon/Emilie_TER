@@ -89,7 +89,7 @@ cat(paste0("- ", vars_cop), sep = "\n")
 ```
 
 
-```{r}
+```{r, results='asis', echo=FALSE}
 # création des tableaux vides
 table_ae <- tibble(
   Variable          = character(),
@@ -254,109 +254,115 @@ for (var in vars_cop) {
 # (f) Affichage final
 # ──────────────────────────────────────────
 
-cat("\n\n## Avertissements\n")
-cat("- **COP3** : impossible de calculer le test de normalité post car toutes les notes valent 5 pour chaque participant.\n")
-cat("- Les variables **COP4**, **COP8** et **COP14** ont exactement les mêmes moyennes aux deux temps (pas de changement observé).\n")
-cat("- **COP15** a renvoyé `NaN` pour le t-test et la taille d’effet (identiques, moyenne=4.67, ET=0.52).\n")
+message("\n## Avertissements\n")
+message("- COP3 Post : impossible de calculer le test de normalité post car toutes les notes valent 5 pour chaque participant.")
+message("- Les variables COP4, **COP8** et **COP14** ont exactement les mêmes moyennes aux deux temps (pas de changement observé).")
+message("- **COP15** a renvoyé `NaN` pour le t-test et la taille d’effet (identiques, moyenne=4.67, ET=0.52).")
 
+```
+
+
+```{r}
 cat("## Tableau AE — auto‐efficacité\n")
 print(knitr::kable(table_ae, align="lcccc", caption="Items AE"))
+```
 
+
+```{r}
 cat("\n## Tableau COP — régulation émotionnelle\n")
 print(knitr::kable(table_cop, align="lcccc", caption="Items COP"))
 ```
+
 ```{r}
 ################################################################################
 # Plots AE et COP  (moyenne ± SD + étoile / NS)            
 ################################################################################
 # ──────────────────────────────────────────────────────────────────────────────
-# 1. Passage en format long (si besoin)  ───────────────────────────────────────
+# 1. Passage en format long (si besoin) & harmonisation des noms
 # ──────────────────────────────────────────────────────────────────────────────
 if (!exists("data_long")) {
   pre  <- pre  %>% mutate(Participant = row_number())
   post <- post %>% mutate(Participant = row_number())
 
+  # valeurs_to = "Valeur" → on renomme plus bas
   data_long <- bind_rows(
     pre  %>% pivot_longer(-Participant,
                           names_to  = "Variable",
-                          values_to = "Value") %>%
+                          values_to = "Valeur") %>%
                mutate(Temps = "Pré"),
     post %>% pivot_longer(-Participant,
                           names_to  = "Variable",
-                          values_to = "Value") %>%
+                          values_to = "Valeur") %>%
                mutate(Temps = "Post")
   ) %>%
-    mutate(Variable = str_squish(Variable))      # ⚑ supprime espaces superflus
+    mutate(Variable = str_squish(Variable))
 }
 
-# Harmonisation du nom de colonne (fr ↔︎ en)
-data_long <- data_long %>% rename(Value = Valeur)
-
+# Renomme seulement si la colonne existe (plus d’arrêt inopiné)
+if ("Valeur" %in% names(data_long)) {
+  data_long <- data_long %>% rename(Value = Valeur)
+}
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 2. Résumé : moyennes, SD, p-value, étoiles  ──────────────────────────────────
+# 2. Résumé statistique : moyennes, SD, p-value, étoiles
 # ──────────────────────────────────────────────────────────────────────────────
 get_summary <- function(df_domain) {
 
-  ## Moyenne & écart-type  (pronoun .data ⇢ évite la NSE-ambiguïté « Value »)
   stats <- df_domain %>%
     group_by(Variable, Temps) %>%
     summarise(moy = mean(.data$Value, na.rm = TRUE),
-              sd  =  sd(.data$Value, na.rm = TRUE),
+              sd  =  sd(.data$Value,  na.rm = TRUE),
               .groups = "drop")
 
-  ## t-test apparié + p-value
   pvals <- df_domain %>%
     pivot_wider(names_from = Temps, values_from = Value) %>%
     group_by(Variable) %>%
     summarise(
       p = tryCatch(
             t.test(.data$Post, .data$Pré, paired = TRUE)$p.value,
-            error = function(e) NA_real_),   # cas pré/post incomplet
+            error = function(e) NA_real_),
       .groups = "drop"
     ) %>%
     mutate(sig = case_when(
-      is.na(p)  ~ "NS",
-      p < .001  ~ "***",
-      p < .01   ~ "**",
-      p < .05   ~ "*",
-      TRUE      ~ "NS"
+      is.na(p) ~ "NS",
+      p < .001 ~ "***",
+      p < .01  ~ "**",
+      p < .05  ~ "*",
+      TRUE     ~ "NS"
     ))
 
   left_join(stats, pvals, by = "Variable")
 }
 
 summary_ae  <- data_long %>%
-  filter(str_detect(Variable, "^AE")) %>%
+  filter(str_detect(Variable, "^AE"))  %>%
   get_summary()
 
 summary_cop <- data_long %>%
   filter(str_detect(Variable, "^COP")) %>%
   get_summary() %>%
-  mutate(num = as.integer(str_extract(Variable, "\\d+"))) %>%   # n° item
+  mutate(num = as.integer(str_extract(Variable, "\\d+"))) %>%
   arrange(num) %>%
   mutate(Variable = factor(Variable,
-                levels = paste0("COP", sort(unique(num))))) %>%  # ordre naturel
+                           levels = paste0("COP", sort(unique(num))))) %>%
   select(-num)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 3. Fonction de tracé  ────────────────────────────────────────────────────────
+# 3. Fonction de tracé améliorée
 # ──────────────────────────────────────────────────────────────────────────────
 plot_domain <- function(df_summary, titre,
                         y_limits,
                         col_pre = "steelblue", col_post = "firebrick") {
 
-  pd            <- position_dodge(width = 0.4)
-  star_size     <- 6
-  axis_size     <- 14
-  axis_face     <- "bold"
+  ## (a) Plus d’écart horizontal entre Pré et Post
+  pd <- position_dodge(width = 0.6)
 
-  ## --- Annotation étoiles / NS + crochet ------------------------------------
+  ## (b) Coordonnées des annotations
   annot <- df_summary %>%
     group_by(Variable) %>%
     summarise(
-      y_text = y_limits[2] - diff(y_limits) * 0.05,
-      y_line = y_limits[2] - diff(y_limits) * 0.08,
+      y_text = y_limits[2] - diff(y_limits) * 0.04,  # texte
+      y_line = y_limits[2] - diff(y_limits) * 0.08,  # crochet
       sig    = first(sig),
       .groups = "drop"
     )
@@ -367,26 +373,28 @@ plot_domain <- function(df_summary, titre,
            x_left  = x_pos - pd$width / 2,
            x_right = x_pos + pd$width / 2)
 
-  ## --- Data fantôme pour légende des p-values ------------------------------
+  ## (c) Data « fantôme » pour la légende des p-values
   legend_df <- tibble(
     Variable = df_summary$Variable[1],
-    moy      = y_limits[1],   # hors zone d’affichage
+    moy      = y_limits[1],
     pv       = factor(c("*", "**", "***", "NS"),
                       levels = c("*", "**", "***", "NS"))
   )
 
-  ## --- Construction du graphique --------------------------------------------
+  ## (d) Construction du graphique
   ggplot(df_summary,
          aes(x = Variable, y = moy, colour = Temps)) +
     geom_errorbar(aes(ymin = moy - sd, ymax = moy + sd),
-                  width = 0.2, position = pd, linewidth = 0.6) +
-    geom_point(size = 3.5, position = pd) +
+                  width = 0.25, position = pd, linewidth = 0.6) +
+    geom_point(size = 3.6, position = pd) +
     geom_segment(data = segment_df,
-                 aes(x = x_left, xend = x_right, y = y_line, yend = y_line),
-                 inherit.aes = FALSE, linewidth = 0.6) +
+                 aes(x = x_left, xend = x_right,
+                     y = y_line, yend = y_line),
+                 inherit.aes = FALSE,
+                 linewidth = 0.8, colour = "black") +
     geom_text(data = annot,
               aes(x = Variable, y = y_text, label = sig),
-              colour = "black", size = star_size, vjust = 0) +
+              colour = "black", size = 6, vjust = 0) +
     geom_point(data = legend_df,
                aes(x = Variable, y = moy, fill = pv),
                alpha = 0, inherit.aes = FALSE) +
@@ -401,35 +409,43 @@ plot_domain <- function(df_summary, titre,
                  "NS  non-significatif")
     ) +
     guides(
-      colour = guide_legend(order = 1),
+      colour = guide_legend(order = 1, label.hjust = 0),
       fill   = guide_legend(order = 2,
+                            label.hjust = 0,
                             override.aes = list(shape = NA, colour = NA))
     ) +
-    scale_y_continuous(limits = y_limits,
-                       expand = expansion(mult = c(0, 0.06))) +
-    labs(title  = titre,
-         y      = "Moyenne ± ET",
-         x      = NULL) +
+    scale_y_continuous(
+      limits = y_limits,
+      breaks = seq(y_limits[1], y_limits[2], 1),                    # entiers
+      labels = scales::number_format(accuracy = 1),
+      expand = expansion(mult = c(0, 0.12))                         # marge haut
+    ) +
+    labs(title = titre,
+         y     = "Moyenne ± ET",
+         x     = NULL) +
     theme_minimal(base_size = 12) +
     theme(
-      axis.text.x   = element_text(angle = 45, hjust = 1,
-                                   size = axis_size, face = axis_face),
-      legend.box    = "vertical",
-      legend.position = "right"
-    )
+      axis.text.x       = element_text(angle = 45, hjust = 1,
+                                       size = 14, face = "bold"),
+      legend.box        = "vertical",
+      legend.box.just   = "left",  # bloc aligné gauche
+      legend.text.align = 0,
+      legend.title.align= 0
+    ) +
+    coord_cartesian(clip = "off")  # garde les crochets même hors panneau
 }
 
+# ──────────────────────────────────────────────────────────────────────────────
+# 4. Création des figures et export PNG
+# ──────────────────────────────────────────────────────────────────────────────
 plot_ae_mean  <- plot_domain(summary_ae,
-                             titre     = "AE : Comparaison Pré vs Post",
-                             y_limits  = c(0, 12))
+                             titre    = "AE : Comparaison Pré vs Post",
+                             y_limits = c(0, 15))
 
 plot_cop_mean <- plot_domain(summary_cop,
-                             titre     = "COP : Comparaison Pré vs Post",
-                             y_limits  = c(0, 7))
+                             titre    = "COP : Comparaison Pré vs Post",
+                             y_limits = c(0, 7))
 
-# ──────────────────────────────────────────────────────────────────────────────
-# 4. Affichage & sauvegarde  ──────────────────────────────────────────────────
-# ──────────────────────────────────────────────────────────────────────────────
 plot_ae_mean
 plot_cop_mean
 
@@ -437,101 +453,6 @@ ggsave("pre_post_ae.png",  plot_ae_mean,
        width = 40, height = 20, units = "cm", dpi = 300, bg = "white")
 ggsave("pre_post_cop.png", plot_cop_mean,
        width = 40, height = 20, units = "cm", dpi = 300, bg = "white")
-
-
-
-```
-
-
-```{r}
-################################################################################
-# Visualisation pré-post
-# ---------------------------------------------------------------------------
-#  – Spaghetti plots par item (AE & COP)
-#  – Forest plot des tailles d’effet (d de Cohen)
-################################################################################
-
-# ══ 1. Préparation des données ════════════════════════════════════════════════
-library(tidyr)      # pivot_longer()
-library(ggplot2)    # graphiques
-library(patchwork)  # mise en page des figures
-library(forcats)    # reorder factors dans la forêt
-
-## a. Passage en format long ----------------------------------------------------
-pre  <- pre  %>% mutate(Participant = row_number())
-post <- post %>% mutate(Participant = row_number())
-
-pre_long  <- pre  %>% pivot_longer(-Participant, names_to = "Variable",
-                                   values_to = "Valeur") %>% mutate(Temps = "Pré")
-post_long <- post %>% pivot_longer(-Participant, names_to = "Variable",
-                                   values_to = "Valeur") %>% mutate(Temps = "Post")
-
-data_long <- bind_rows(pre_long, post_long)
-
-# ══ 2. Paired plots (spaghetti) ════════════════════════════════════════════════
-plot_spaghetti <- function(df, domaine, couleur_moyenne) {
-  df |>
-    filter(str_detect(Variable, paste0("^", domaine))) |>
-    ggplot(aes(x = Temps, y = Valeur, group = Participant)) +
-    geom_line(alpha = .4) +
-    geom_point(size = 2) +
-    stat_summary(aes(group = 1), fun = mean, geom = "line",
-                 size = 1.1, colour = couleur_moyenne) +
-    stat_summary(aes(group = 1), fun = mean, geom = "point",
-                 size = 3,   colour = couleur_moyenne) +
-    facet_wrap(~Variable, scales = "free_y") +
-    labs(title = glue::glue("Évolution pré-post — {domaine}"),
-         subtitle = "Ligne fine : participant·e — Ligne épaisse : moyenne",
-         x = NULL, y = "Score") +
-    theme_minimal(base_size = 11)
-}
-
-plot_ae  <- plot_spaghetti(data_long, "AE",  "red")
-plot_cop <- plot_spaghetti(data_long, "COP", "blue")
-
-################################################################################
-# Forest-plot corrigé — gestion des d manquants / indéfinis
-################################################################################
-
-library(forcats)   # déjà chargé plus haut, rappelé ici pour clarté
-
-plot_effets <- bind_rows(table_ae, table_cop) %>%
-  mutate(
-    Domaine     = if_else(str_detect(Variable, "^AE"), "AE", "COP"),
-    `d de Cohen`= ifelse(is.nan(`d de Cohen`), NA_real_, `d de Cohen`)  # NaN → NA
-  ) %>%
-  drop_na(`d de Cohen`)   # on retire les items sans taille d’effet
-
-plot_d <- plot_effets %>%                         # on ré-ordonne AVANT aes()
-  mutate(Variable = fct_reorder(Variable, `d de Cohen`)) %>%
-  ggplot(aes(x = `d de Cohen`, y = Variable, colour = Domaine)) +
-  geom_vline(xintercept = 0, linetype = "dashed") +
-  geom_point(size = 3) +
-  scale_colour_manual(values = c(AE = "red", COP = "blue")) +
-  labs(
-    title = "Taille d’effet (d de Cohen) par item",
-    x     = "d de Cohen (|0.2| faible · |0.5| moyen · |0.8| fort)",
-    y     = NULL, colour = "Domaine"
-  ) +
-  theme_minimal(base_size = 11)
-
-# ══ 4. Assemblage et affichage ════════════════════════════════════════════════
-(plot_ae / plot_cop) | plot_d + plot_layout(guides = "collect")
-
-combined_plot <- (plot_ae / plot_cop) | plot_d + 
-                 plot_layout(guides = "collect")
-
-# 2. Sauvegarde en PNG haute résolution
-ggsave(
-  filename = "pre_post_combined_plot.png",  # nom du fichier ; pas de chemin = dossier courant
-  plot     = combined_plot,
-  width    = 12,     # pouces  → ~30 cm
-  height   = 8,      # pouces  → ~20 cm
-  units    = "in",
-  dpi      = 300     # impression haute qualité
-)
-
-
 ```
 
 
