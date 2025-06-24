@@ -1,0 +1,15 @@
+---
+title: "Analyse pré–post : auto-efficacité et régulation émotionnelle"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# ============
+# Pré-requis
+# ============
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+library(tidyverse)   # dplyr, readr, purrr…
+library(effsize)     # pour cohen.d()
+library(broom)       # pour tidy()
+library(knitr)       # kable()
