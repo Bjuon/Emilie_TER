@@ -1,15 +1,537 @@
 ---
-title: "Analyse pré–post : auto-efficacité et régulation émotionnelle"
+title: "Pre-Post intervention"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
-# ============
-# Pré-requis
-# ============
-knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 
-library(tidyverse)   # dplyr, readr, purrr…
-library(effsize)     # pour cohen.d()
-library(broom)       # pour tidy()
-library(knitr)       # kable()
+
+```{r}
+################################################################################
+# Analyse pré–post (6 participants) 
+# ---------------------------------------------------------------------------
+# 1. Charge les jeux de données preinter.csv / postinter.csv.
+# 2. Sépare les variables :
+#       • AE*  = sentiment d’auto-efficacité
+#       • COP* = régulation émotionnelle
+# 3. Pour chaque variable :
+#       • Shapiro-Wilk normalité (pré & post) --> si valeurs non identiques
+#       • t-test Welch non appareillé          → t-value, p-value
+#       • d de Cohen                           → magnitude (très faible → très forte)
+# 5. Concatène les résultats dans deux tableaux, 
+################################################################################
+
+# ──────────────────────────────────────────
+# instalation automatique des librairies
+# ──────────────────────────────────────────
+pkgs <- c(
+  "tidyverse",  # contient dplyr, readr, purrr, stringr, etc.
+  "effsize",    # pour la fonction cohen.d()
+  "broom",      # tidy() pour mettre en forme les résultats de tests
+  "knitr"       # pour kable(), la mise en forme des tableaux
+)
+to_install <- pkgs[!(pkgs %in% rownames(installed.packages()))]
+if (length(to_install)) install.packages(to_install, dependencies = TRUE)
+
+# ──────────────────────────────────────────
+# Chargement des librairies
+# ──────────────────────────────────────────
+invisible(
+  lapply(pkgs, function(pkg) {
+    library(pkg, character.only = TRUE, quietly = TRUE)
+    cat("✔  Package chargé :", pkg, "\n")
+  })
+)
+
+```
+
+
+```{r}
+# ──────────────────────────────────────────
+# Lecture des fichiers 
+# ──────────────────────────────────────────
+pre  <- read_delim(
+  "preinter.csv",
+  delim           = ";", # le séparateur est un ; exce francophone
+  show_col_types  = FALSE, # on n'affiche pas le type de données par colones 
+  locale          = locale(encoding = "UTF-8"), # caractères classique 
+  col_types       = cols(
+    `n°`     = col_skip(),     # on ignore la colonne ID
+    .default = col_double()    # toutes les autres colonnes sont définis comme numériques
+  )
+)
+
+post <- read_delim(
+  "postinter.csv",
+  delim           = ";",
+  show_col_types  = FALSE,
+  locale          = locale(encoding = "UTF-8"),
+  col_types       = cols(
+    `n°`     = col_skip(),
+    .default = col_double()
+  )
+)
+
+
+# ──────────────────────────────────────────
+# (c) Détection des familles de variables
+# ──────────────────────────────────────────
+vars_ae  <- names(pre)  %>% str_subset("^AE")
+vars_cop <- names(pre)  %>% str_subset("^COP")
+
+# verification que les 2 fichiers (pre/post) contiennent les mêmes variables
+vars_ae  <- intersect(vars_ae,  names(post))  
+vars_cop <- intersect(vars_cop, names(post))
+
+cat("Variables de sentiment d’auto-efficacité (AE) identifiées :\n")
+cat(paste0("- ", vars_ae), sep = "\n")
+cat("\nVariables de régulation émotionnelle (COP) identifiées :\n")
+cat(paste0("- ", vars_cop), sep = "\n")
+```
+
+
+```{r}
+# création des tableaux vides
+table_ae <- tibble(
+  Variable          = character(),
+  `Pré intervention moyenne (ET)`  = character(),
+  `Post intervention moyenne (ET)` = character(),
+  t                 = numeric(),
+  p                 = numeric(),
+  `d de Cohen`      = numeric(),
+  `Taille d'effet`  = character(),
+  `Shapiro pré (p)` = numeric(),
+  `Shapiro post (p)`= numeric()
+)
+
+table_cop <- tibble(
+  Variable          = character(),
+  `Pré intervention moyenne (ET)`  = character(),
+  `Post intervention moyenne (ET)` = character(),
+  t                 = numeric(),
+  p                 = numeric(),
+  `d de Cohen`      = numeric(),
+  `Taille d'effet`  = character(),
+  `Shapiro pré (p)` = numeric(),
+  `Shapiro post (p)`= numeric()
+)
+
+# --- Analyse AE (sentiment d’auto-efficacité) ---
+for (var in vars_ae) {
+  # Extraction des données pré- et post-intervention
+  pre_vals  <- (pre[[var]])
+  post_vals <- (post[[var]])
+  
+  # ─── Test de normalité Shapiro-Wilk (pré)
+  shapiro_pre_test  <- shapiro.test(pre_vals)
+  p_shapiro_pre     <- shapiro_pre_test$p.value
+  # Affichage du W et de la p-value
+  cat(sprintf(
+    "Shapiro-Wilk pré [%s] : W = %.3f, p = %.3f\n",
+    var,
+    shapiro_pre_test$statistic,
+    signif(p_shapiro_pre, 3)
+  ))
+  
+  # ─── Test de normalité Shapiro-Wilk (post)
+  shapiro_post_test <- shapiro.test(post_vals)
+  p_shapiro_post    <- shapiro_post_test$p.value
+  # Affichage du W et de la p-value
+  cat(sprintf(
+    "Shapiro-Wilk post [%s] : W = %.3f, p = %.3f\n\n",
+    var,
+    shapiro_post_test$statistic,
+    signif(p_shapiro_post, 3)
+  ))
+  
+  # ─── Test t  appareillé (Welch)
+  t_res <- t.test(post_vals, pre_vals, paired = TRUE)
+  
+  # ─── Calcul du d de Cohen
+# ─── d de Cohen pour données appariées ────────────────────────────────
+d_res <- effsize::cohen.d(
+  post_vals,        # vecteur post-intervention
+  pre_vals,         # vecteur pré-intervention
+  paired = TRUE,    #  appariées
+)  
+  # ─── Interprétation de la taille d’effet je sais pas si c'est ca que tu veux associer d à un type d'effet 
+  magnitude <- cut(
+    abs(d_res$estimate),
+    breaks = c(0, 0.2, 0.5, 0.8, 1.3, Inf),
+    labels = c("très faible", "faible", "moyenne", "forte", "très forte"),
+    right  = FALSE
+  )
+  
+  # ─── remplissage du tableau AE
+  table_ae <- table_ae %>%
+    add_row(
+      Variable           = var,
+      `Pré intervention moyenne (ET)` = sprintf("%.2f (%.2f)", mean(pre_vals),  sd(pre_vals)),
+      `Post intervention moyenne (ET)`= sprintf("%.2f (%.2f)", mean(post_vals), sd(post_vals)),
+      t                  = round(t_res$statistic, 3),
+      p                  = signif(t_res$p.value,  3),
+      `d de Cohen`       = round(d_res$estimate,   3),
+      `Taille d'effet`   = as.character(magnitude),
+      `Shapiro pré (p)`  = signif(p_shapiro_pre,   3),
+      `Shapiro post (p)` = signif(p_shapiro_post,  3)
+    )
+}
+
+# --- COP (régulation émotionnelle) ---
+for (var in vars_cop) {
+  # Extraction des données pré- et post-intervention
+  pre_vals  <- (pre[[var]])
+  post_vals <- (post[[var]])
+  
+  # ─── Test de normalité Shapiro-Wilk (pré)
+  if (length(unique(pre_vals)) > 1) {
+    sh_pre <- shapiro.test(pre_vals)
+    p_shapiro_pre <- sh_pre$p.value
+    cat(sprintf(
+      "Shapiro-Wilk pré [%s] : W = %.3f, p = %.3f\n",
+      var,
+      sh_pre$statistic,
+      signif(p_shapiro_pre, 3)
+    ))
+  } else {
+    # Cas où toutes les réponses sont identiques 
+    p_shapiro_pre <- NA_real_
+    cat(sprintf(
+      "Shapiro-Wilk pré [%s] : NA (valeurs identiques)\n",
+      var
+    ))
+  }
+  
+  # ─── Test de normalité Shapiro-Wilk (post)
+  if (length(unique(post_vals)) > 1) {
+    sh_post <- shapiro.test(post_vals)
+    p_shapiro_post <- sh_post$p.value
+    cat(sprintf(
+      "Shapiro-Wilk post [%s] : W = %.3f, p = %.3f\n\n",
+      var,
+      sh_post$statistic,
+      signif(p_shapiro_post, 3)
+    ))
+  } else {
+    p_shapiro_post <- NA_real_
+    cat(sprintf(
+      "Shapiro-Wilk post [%s] : NA (valeurs identiques)\n\n",
+      var
+    ))
+  }
+  # ─── Test t appareillé
+  t_res <- t.test(post_vals, pre_vals, paired = TRUE) 
+  
+  # ─── Calcul du d de Cohen
+  d_res <- effsize::cohen.d(
+  post_vals,        # vecteur post-intervention
+  pre_vals,         # vecteur pré-intervention
+  paired = TRUE,    #  appariées
+)
+  # ─── Interprétation de la taille d’effet
+  magnitude <- cut(
+    abs(d_res$estimate),
+    breaks = c(0, 0.2, 0.5, 0.8, 1.3, Inf),
+    labels = c("très faible", "faible", "moyenne", "forte", "très forte"),
+    right  = FALSE
+  )
+  
+  # ─── Remplissage du tableau COP
+  table_cop <- table_cop %>%
+    add_row(
+      Variable           = var,
+      `Pré intervention moyenne (ET)` = sprintf("%.2f (%.2f)", mean(pre_vals),  sd(pre_vals)),
+      `Post intervention moyenne (ET)`= sprintf("%.2f (%.2f)", mean(post_vals), sd(post_vals)),
+      t                  = round(t_res$statistic, 3),
+      p                  = signif(t_res$p.value,  3),
+      `d de Cohen`       = round(d_res$estimate,   3),
+      `Taille d'effet`   = as.character(magnitude),
+      `Shapiro pré (p)`  = signif(p_shapiro_pre,   3),
+      `Shapiro post (p)` = signif(p_shapiro_post,  3)
+    )
+}
+
+# ──────────────────────────────────────────
+# (f) Affichage final
+# ──────────────────────────────────────────
+
+cat("\n\n## Avertissements\n")
+cat("- **COP3** : impossible de calculer le test de normalité post car toutes les notes valent 5 pour chaque participant.\n")
+cat("- Les variables **COP4**, **COP8** et **COP14** ont exactement les mêmes moyennes aux deux temps (pas de changement observé).\n")
+cat("- **COP15** a renvoyé `NaN` pour le t-test et la taille d’effet (identiques, moyenne=4.67, ET=0.52).\n")
+
+cat("## Tableau AE — auto‐efficacité\n")
+print(knitr::kable(table_ae, align="lcccc", caption="Items AE"))
+
+cat("\n## Tableau COP — régulation émotionnelle\n")
+print(knitr::kable(table_cop, align="lcccc", caption="Items COP"))
+```
+```{r}
+################################################################################
+# Plots AE et COP  (moyenne ± SD + étoile / NS)            
+################################################################################
+# ──────────────────────────────────────────────────────────────────────────────
+# 1. Passage en format long (si besoin)  ───────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+if (!exists("data_long")) {
+  pre  <- pre  %>% mutate(Participant = row_number())
+  post <- post %>% mutate(Participant = row_number())
+
+  data_long <- bind_rows(
+    pre  %>% pivot_longer(-Participant,
+                          names_to  = "Variable",
+                          values_to = "Value") %>%
+               mutate(Temps = "Pré"),
+    post %>% pivot_longer(-Participant,
+                          names_to  = "Variable",
+                          values_to = "Value") %>%
+               mutate(Temps = "Post")
+  ) %>%
+    mutate(Variable = str_squish(Variable))      # ⚑ supprime espaces superflus
+}
+
+# Harmonisation du nom de colonne (fr ↔︎ en)
+data_long <- data_long %>% rename(Value = Valeur)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 2. Résumé : moyennes, SD, p-value, étoiles  ──────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+get_summary <- function(df_domain) {
+
+  ## Moyenne & écart-type  (pronoun .data ⇢ évite la NSE-ambiguïté « Value »)
+  stats <- df_domain %>%
+    group_by(Variable, Temps) %>%
+    summarise(moy = mean(.data$Value, na.rm = TRUE),
+              sd  =  sd(.data$Value, na.rm = TRUE),
+              .groups = "drop")
+
+  ## t-test apparié + p-value
+  pvals <- df_domain %>%
+    pivot_wider(names_from = Temps, values_from = Value) %>%
+    group_by(Variable) %>%
+    summarise(
+      p = tryCatch(
+            t.test(.data$Post, .data$Pré, paired = TRUE)$p.value,
+            error = function(e) NA_real_),   # cas pré/post incomplet
+      .groups = "drop"
+    ) %>%
+    mutate(sig = case_when(
+      is.na(p)  ~ "NS",
+      p < .001  ~ "***",
+      p < .01   ~ "**",
+      p < .05   ~ "*",
+      TRUE      ~ "NS"
+    ))
+
+  left_join(stats, pvals, by = "Variable")
+}
+
+summary_ae  <- data_long %>%
+  filter(str_detect(Variable, "^AE")) %>%
+  get_summary()
+
+summary_cop <- data_long %>%
+  filter(str_detect(Variable, "^COP")) %>%
+  get_summary() %>%
+  mutate(num = as.integer(str_extract(Variable, "\\d+"))) %>%   # n° item
+  arrange(num) %>%
+  mutate(Variable = factor(Variable,
+                levels = paste0("COP", sort(unique(num))))) %>%  # ordre naturel
+  select(-num)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 3. Fonction de tracé  ────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+plot_domain <- function(df_summary, titre,
+                        y_limits,
+                        col_pre = "steelblue", col_post = "firebrick") {
+
+  pd            <- position_dodge(width = 0.4)
+  star_size     <- 6
+  axis_size     <- 14
+  axis_face     <- "bold"
+
+  ## --- Annotation étoiles / NS + crochet ------------------------------------
+  annot <- df_summary %>%
+    group_by(Variable) %>%
+    summarise(
+      y_text = y_limits[2] - diff(y_limits) * 0.05,
+      y_line = y_limits[2] - diff(y_limits) * 0.08,
+      sig    = first(sig),
+      .groups = "drop"
+    )
+
+  var_levels <- levels(df_summary$Variable)
+  segment_df <- annot %>%
+    mutate(x_pos   = as.numeric(factor(Variable, levels = var_levels)),
+           x_left  = x_pos - pd$width / 2,
+           x_right = x_pos + pd$width / 2)
+
+  ## --- Data fantôme pour légende des p-values ------------------------------
+  legend_df <- tibble(
+    Variable = df_summary$Variable[1],
+    moy      = y_limits[1],   # hors zone d’affichage
+    pv       = factor(c("*", "**", "***", "NS"),
+                      levels = c("*", "**", "***", "NS"))
+  )
+
+  ## --- Construction du graphique --------------------------------------------
+  ggplot(df_summary,
+         aes(x = Variable, y = moy, colour = Temps)) +
+    geom_errorbar(aes(ymin = moy - sd, ymax = moy + sd),
+                  width = 0.2, position = pd, linewidth = 0.6) +
+    geom_point(size = 3.5, position = pd) +
+    geom_segment(data = segment_df,
+                 aes(x = x_left, xend = x_right, y = y_line, yend = y_line),
+                 inherit.aes = FALSE, linewidth = 0.6) +
+    geom_text(data = annot,
+              aes(x = Variable, y = y_text, label = sig),
+              colour = "black", size = star_size, vjust = 0) +
+    geom_point(data = legend_df,
+               aes(x = Variable, y = moy, fill = pv),
+               alpha = 0, inherit.aes = FALSE) +
+    scale_colour_manual(values = c("Pré" = col_pre, "Post" = col_post),
+                        name   = "Temps") +
+    scale_fill_manual(
+      name   = NULL,
+      values = rep("white", 4),
+      labels = c("*   p < .05",
+                 "**  p < .01",
+                 "*** p < .001",
+                 "NS  non-significatif")
+    ) +
+    guides(
+      colour = guide_legend(order = 1),
+      fill   = guide_legend(order = 2,
+                            override.aes = list(shape = NA, colour = NA))
+    ) +
+    scale_y_continuous(limits = y_limits,
+                       expand = expansion(mult = c(0, 0.06))) +
+    labs(title  = titre,
+         y      = "Moyenne ± ET",
+         x      = NULL) +
+    theme_minimal(base_size = 12) +
+    theme(
+      axis.text.x   = element_text(angle = 45, hjust = 1,
+                                   size = axis_size, face = axis_face),
+      legend.box    = "vertical",
+      legend.position = "right"
+    )
+}
+
+plot_ae_mean  <- plot_domain(summary_ae,
+                             titre     = "AE : Comparaison Pré vs Post",
+                             y_limits  = c(0, 12))
+
+plot_cop_mean <- plot_domain(summary_cop,
+                             titre     = "COP : Comparaison Pré vs Post",
+                             y_limits  = c(0, 7))
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 4. Affichage & sauvegarde  ──────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+plot_ae_mean
+plot_cop_mean
+
+ggsave("pre_post_ae.png",  plot_ae_mean,
+       width = 40, height = 20, units = "cm", dpi = 300, bg = "white")
+ggsave("pre_post_cop.png", plot_cop_mean,
+       width = 40, height = 20, units = "cm", dpi = 300, bg = "white")
+
+
+
+```
+
+
+```{r}
+################################################################################
+# Visualisation pré-post
+# ---------------------------------------------------------------------------
+#  – Spaghetti plots par item (AE & COP)
+#  – Forest plot des tailles d’effet (d de Cohen)
+################################################################################
+
+# ══ 1. Préparation des données ════════════════════════════════════════════════
+library(tidyr)      # pivot_longer()
+library(ggplot2)    # graphiques
+library(patchwork)  # mise en page des figures
+library(forcats)    # reorder factors dans la forêt
+
+## a. Passage en format long ----------------------------------------------------
+pre  <- pre  %>% mutate(Participant = row_number())
+post <- post %>% mutate(Participant = row_number())
+
+pre_long  <- pre  %>% pivot_longer(-Participant, names_to = "Variable",
+                                   values_to = "Valeur") %>% mutate(Temps = "Pré")
+post_long <- post %>% pivot_longer(-Participant, names_to = "Variable",
+                                   values_to = "Valeur") %>% mutate(Temps = "Post")
+
+data_long <- bind_rows(pre_long, post_long)
+
+# ══ 2. Paired plots (spaghetti) ════════════════════════════════════════════════
+plot_spaghetti <- function(df, domaine, couleur_moyenne) {
+  df |>
+    filter(str_detect(Variable, paste0("^", domaine))) |>
+    ggplot(aes(x = Temps, y = Valeur, group = Participant)) +
+    geom_line(alpha = .4) +
+    geom_point(size = 2) +
+    stat_summary(aes(group = 1), fun = mean, geom = "line",
+                 size = 1.1, colour = couleur_moyenne) +
+    stat_summary(aes(group = 1), fun = mean, geom = "point",
+                 size = 3,   colour = couleur_moyenne) +
+    facet_wrap(~Variable, scales = "free_y") +
+    labs(title = glue::glue("Évolution pré-post — {domaine}"),
+         subtitle = "Ligne fine : participant·e — Ligne épaisse : moyenne",
+         x = NULL, y = "Score") +
+    theme_minimal(base_size = 11)
+}
+
+plot_ae  <- plot_spaghetti(data_long, "AE",  "red")
+plot_cop <- plot_spaghetti(data_long, "COP", "blue")
+
+################################################################################
+# Forest-plot corrigé — gestion des d manquants / indéfinis
+################################################################################
+
+library(forcats)   # déjà chargé plus haut, rappelé ici pour clarté
+
+plot_effets <- bind_rows(table_ae, table_cop) %>%
+  mutate(
+    Domaine     = if_else(str_detect(Variable, "^AE"), "AE", "COP"),
+    `d de Cohen`= ifelse(is.nan(`d de Cohen`), NA_real_, `d de Cohen`)  # NaN → NA
+  ) %>%
+  drop_na(`d de Cohen`)   # on retire les items sans taille d’effet
+
+plot_d <- plot_effets %>%                         # on ré-ordonne AVANT aes()
+  mutate(Variable = fct_reorder(Variable, `d de Cohen`)) %>%
+  ggplot(aes(x = `d de Cohen`, y = Variable, colour = Domaine)) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  geom_point(size = 3) +
+  scale_colour_manual(values = c(AE = "red", COP = "blue")) +
+  labs(
+    title = "Taille d’effet (d de Cohen) par item",
+    x     = "d de Cohen (|0.2| faible · |0.5| moyen · |0.8| fort)",
+    y     = NULL, colour = "Domaine"
+  ) +
+  theme_minimal(base_size = 11)
+
+# ══ 4. Assemblage et affichage ════════════════════════════════════════════════
+(plot_ae / plot_cop) | plot_d + plot_layout(guides = "collect")
+
+combined_plot <- (plot_ae / plot_cop) | plot_d + 
+                 plot_layout(guides = "collect")
+
+# 2. Sauvegarde en PNG haute résolution
+ggsave(
+  filename = "pre_post_combined_plot.png",  # nom du fichier ; pas de chemin = dossier courant
+  plot     = combined_plot,
+  width    = 12,     # pouces  → ~30 cm
+  height   = 8,      # pouces  → ~20 cm
+  units    = "in",
+  dpi      = 300     # impression haute qualité
+)
+
+
+```
+
+
