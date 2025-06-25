@@ -87,7 +87,7 @@ cat(paste0("- ", vars_ae), sep = "\n")
 cat("\nVariables de régulation émotionnelle (COP) identifiées :\n")
 cat(paste0("- ", vars_cop), sep = "\n")
 ```
-
+## Seulement T-test sans changement basé sur le normalité ou non des datas 
 
 ```{r, results='asis', echo=FALSE}
 # création des tableaux vides
@@ -115,6 +115,11 @@ table_cop <- tibble(
   `Shapiro post (p)`= numeric()
 )
 
+# ──────────────────────────────────────────
+# Seuil alpha pour la normalité
+# ──────────────────────────────────────────
+alpha <- 0.05
+
 # --- Analyse AE (sentiment d’auto-efficacité) ---
 for (var in vars_ae) {
   # Extraction des données pré- et post-intervention
@@ -131,6 +136,13 @@ for (var in vars_ae) {
     shapiro_pre_test$statistic,
     signif(p_shapiro_pre, 3)
   ))
+   # ─── Alerte si normalité non respectée
+  if (p_shapiro_pre < alpha) {
+    cat(sprintf(
+      "⚠️ Attention : normalité non respectée pour %s (pré), p = %.3f. (on rejette l'hypothèse nulle)\n",
+      var,
+      signif(p_shapiro_pre, 3)    ))
+  }
   
   # ─── Test de normalité Shapiro-Wilk (post)
   shapiro_post_test <- shapiro.test(post_vals)
@@ -142,6 +154,13 @@ for (var in vars_ae) {
     shapiro_post_test$statistic,
     signif(p_shapiro_post, 3)
   ))
+  if (p_shapiro_post < alpha) {
+    cat(sprintf(
+      "⚠️ Attention : normalité non respectée pour %s (post), p = %.3f. (on rejette l'hypothèse nulle)\n",
+      var,
+      signif(p_shapiro_post, 3)    ))
+  }
+  cat("\n")
   
   # ─── Test t  appareillé (Welch)
   t_res <- t.test(post_vals, pre_vals, paired = TRUE)
@@ -182,7 +201,7 @@ for (var in vars_cop) {
   pre_vals  <- (pre[[var]])
   post_vals <- (post[[var]])
   
-  # ─── Test de normalité Shapiro-Wilk (pré)
+   # ─── Test de normalité Shapiro-Wilk (pré)
   if (length(unique(pre_vals)) > 1) {
     sh_pre <- shapiro.test(pre_vals)
     p_shapiro_pre <- sh_pre$p.value
@@ -192,8 +211,15 @@ for (var in vars_cop) {
       sh_pre$statistic,
       signif(p_shapiro_pre, 3)
     ))
+    # ─── Alerte si normalité non respectée (pré)
+    if (p_shapiro_pre < alpha) {
+      cat(sprintf(
+        "⚠️ Attention : normalité non respectée pour %s (pré), p = %.3f. (on rejette l'hypothèse nulle)\n",
+        var,
+        signif(p_shapiro_pre, 3)
+      ))
+    }
   } else {
-    # Cas où toutes les réponses sont identiques 
     p_shapiro_pre <- NA_real_
     cat(sprintf(
       "Shapiro-Wilk pré [%s] : NA (valeurs identiques)\n",
@@ -201,7 +227,7 @@ for (var in vars_cop) {
     ))
   }
   
-  # ─── Test de normalité Shapiro-Wilk (post)
+# ─── Test de normalité Shapiro-Wilk (post)
   if (length(unique(post_vals)) > 1) {
     sh_post <- shapiro.test(post_vals)
     p_shapiro_post <- sh_post$p.value
@@ -211,6 +237,14 @@ for (var in vars_cop) {
       sh_post$statistic,
       signif(p_shapiro_post, 3)
     ))
+    # ─── Alerte si normalité non respectée (post)
+    if (p_shapiro_post < alpha) {
+      cat(sprintf(
+        "⚠️ Attention : normalité non respectée pour %s (post), p = %.3f. (on rejette l'hypothèse nulle)\n",
+        var,
+        signif(p_shapiro_post, 3)
+      ))
+    }
   } else {
     p_shapiro_post <- NA_real_
     cat(sprintf(
@@ -255,204 +289,431 @@ for (var in vars_cop) {
 # ──────────────────────────────────────────
 
 message("\n## Avertissements\n")
+message(" - Beaucoup de tests de normalité échouent")
 message("- COP3 Post : impossible de calculer le test de normalité post car toutes les notes valent 5 pour chaque participant.")
-message("- Les variables COP4, **COP8** et **COP14** ont exactement les mêmes moyennes aux deux temps (pas de changement observé).")
-message("- **COP15** a renvoyé `NaN` pour le t-test et la taille d’effet (identiques, moyenne=4.67, ET=0.52).")
+message("- Les variables COP4, COP8 et COP14 ont exactement les mêmes moyennes aux deux temps (pas de changement observé).")
+message("- **COP15** a renvoyé `NaN` pour le t-test et la taille d’effet (data identiques entre pre et post, moyenne=4.67, ET=0.52).")
 
 ```
 
 
 ```{r}
-cat("## Tableau AE — auto‐efficacité\n")
 print(knitr::kable(table_ae, align="lcccc", caption="Items AE"))
 ```
 
 
 ```{r}
-cat("\n## Tableau COP — régulation émotionnelle\n")
 print(knitr::kable(table_cop, align="lcccc", caption="Items COP"))
+```
+
+
+# T-test ou Signed rank wilcoxon selon normalité 
+
+```{r, results='asis', echo=FALSE}
+
+# ──────────────────────────────────────────
+# 1) Préparer 4 tableaux vides
+#    • AE_t  / COP_t  : t-test seul  
+#    • AE_tw / COP_tw : t-test ou Wilcoxon
+# avec moyennes ± SD pre/post
+# ──────────────────────────────────────────
+table_ae_t  <- tibble(
+  Variable             = character(),
+  `Pré (M±SD)`         = character(),
+  `Post (M±SD)`        = character(),
+  t                     = numeric(),
+  p                     = numeric(),
+  `d de Cohen`          = numeric(),
+  `Taille d'effet`      = character()
+)
+table_ae_tw <- tibble(
+  Variable             = character(),
+  `Pré (M±SD)`         = character(),
+  `Post (M±SD)`        = character(),
+  Méthode              = character(),
+  `Stat (t/W)`         = numeric(),
+  p                     = numeric(),
+  `d de Cohen`          = numeric(),
+  `Taille d'effet`      = character()
+)
+table_cop_t  <- tibble(
+  Variable             = character(),
+  `Pré (M±SD)`         = character(),
+  `Post (M±SD)`        = character(),
+  t                     = numeric(),
+  p                     = numeric(),
+  `d de Cohen`          = numeric(),
+  `Taille d'effet`      = character()
+)
+table_cop_tw <- tibble(
+  Variable             = character(),
+  `Pré (M±SD)`         = character(),
+  `Post (M±SD)`        = character(),
+  Méthode              = character(),
+  `Stat (t/W)`         = numeric(),
+  p                     = numeric(),
+  `d de Cohen`          = numeric(),
+  `Taille d'effet`      = character()
+)
+
+alpha <- 0.05
+
+# ──────────────────────────────────────────
+# 2) Boucle AE
+# ──────────────────────────────────────────
+for(var in vars_ae) {
+  pre_vals  <- pre[[var]]
+  post_vals <- post[[var]]
+  pre_lbl   <- sprintf("%.2f (%.2f)", mean(pre_vals), sd(pre_vals))
+  post_lbl  <- sprintf("%.2f (%.2f)", mean(post_vals), sd(post_vals))
+
+  # Normalité
+  p_pre  <- shapiro.test(pre_vals)$p.value
+  p_post <- shapiro.test(post_vals)$p.value
+
+  # — t-test toujours
+  tt  <- t.test(post_vals, pre_vals, paired=TRUE)
+  d_t <- cohen.d(post_vals, pre_vals, paired=TRUE)$estimate
+  mag_t <- cut(abs(d_t),
+               breaks=c(0,0.2,0.5,0.8,1.3,Inf),
+               labels=c("très faible","faible","moyenne","forte","très forte"),
+               right=FALSE)
+
+  table_ae_t <- table_ae_t %>% 
+    add_row(
+      Variable        = var,
+      `Pré (M±SD)`    = pre_lbl,
+      `Post (M±SD)`   = post_lbl,
+      t               = round(tt$statistic,3),
+      p               = signif(tt$p.value,3),
+      `d de Cohen`    = round(d_t,3),
+      `Taille d'effet`= as.character(mag_t)
+    )
+
+  # — t-test vs Wilcoxon
+  if(p_pre >= alpha && p_post >= alpha) {
+    methode <- "t-test"
+    stat2   <- tt$statistic
+    p2      <- tt$p.value
+    d2      <- d_t
+  } else {
+    methode <- "Wilcoxon"
+    wt      <- wilcox.test(post_vals, pre_vals, paired=TRUE, exact=FALSE)
+    n_pairs <- length(na.omit(post_vals - pre_vals))
+    z       <- qnorm(wt$p.value/2, lower.tail=FALSE)
+    d2      <- z/sqrt(n_pairs)
+    stat2   <- as.numeric(wt$statistic)
+    p2      <- wt$p.value
+  }
+  mag2 <- cut(abs(d2),
+              breaks=c(0,0.2,0.5,0.8,1.3,Inf),
+              labels=c("très faible","faible","moyenne","forte","très forte"),
+              right=FALSE)
+
+  table_ae_tw <- table_ae_tw %>% 
+    add_row(
+      Variable        = var,
+      `Pré (M±SD)`    = pre_lbl,
+      `Post (M±SD)`   = post_lbl,
+      Méthode         = methode,
+      `Stat (t/W)`    = round(stat2,3),
+      p               = signif(p2,3),
+      `d de Cohen`    = round(d2,3),
+      `Taille d'effet`= as.character(mag2)
+    )
+}
+
+# ──────────────────────────────────────────
+# 3) Boucle COP (même logique)
+# ──────────────────────────────────────────
+for(var in vars_cop) {
+  pre_vals  <- pre[[var]]
+  post_vals <- post[[var]]
+  pre_lbl   <- sprintf("%.2f (%.2f)", mean(pre_vals), sd(pre_vals))
+  post_lbl  <- sprintf("%.2f (%.2f)", mean(post_vals), sd(post_vals))
+
+  # Normalité (ou NA si identique)
+  p_pre  <- if(length(unique(pre_vals))>1)  shapiro.test(pre_vals)$p.value  else NA_real_
+  p_post <- if(length(unique(post_vals))>1) shapiro.test(post_vals)$p.value else NA_real_
+
+  # — t-test toujours
+  tt  <- t.test(post_vals, pre_vals, paired=TRUE)
+  d_t <- cohen.d(post_vals, pre_vals, paired=TRUE)$estimate
+  mag_t <- cut(abs(d_t),
+               breaks=c(0,0.2,0.5,0.8,1.3,Inf),
+               labels=c("très faible","faible","moyenne","forte","très forte"),
+               right=FALSE)
+
+  table_cop_t <- table_cop_t %>% 
+    add_row(
+      Variable        = var,
+      `Pré (M±SD)`    = pre_lbl,
+      `Post (M±SD)`   = post_lbl,
+      t               = round(tt$statistic,3),
+      p               = signif(tt$p.value,3),
+      `d de Cohen`    = round(d_t,3),
+      `Taille d'effet`= as.character(mag_t)
+    )
+
+  # — t-test vs Wilcoxon
+  if(!is.na(p_pre) && !is.na(p_post) && p_pre >= alpha && p_post >= alpha) {
+    methode <- "t-test"
+    stat2   <- tt$statistic
+    p2      <- tt$p.value
+    d2      <- d_t
+  } else {
+    methode <- "Wilcoxon"
+    wt      <- wilcox.test(post_vals, pre_vals, paired=TRUE, exact=FALSE)
+    n_pairs <- length(na.omit(post_vals - pre_vals))
+    z       <- qnorm(wt$p.value/2, lower.tail=FALSE)
+    d2      <- z/sqrt(n_pairs)
+    stat2   <- as.numeric(wt$statistic)
+    p2      <- wt$p.value
+  }
+  mag2 <- cut(abs(d2),
+              breaks=c(0,0.2,0.5,0.8,1.3,Inf),
+              labels=c("très faible","faible","moyenne","forte","très forte"),
+              right=FALSE)
+
+  table_cop_tw <- table_cop_tw %>% 
+    add_row(
+      Variable        = var,
+      `Pré (M±SD)`    = pre_lbl,
+      `Post (M±SD)`   = post_lbl,
+      Méthode         = methode,
+      `Stat (t/W)`    = round(stat2,3),
+      p               = signif(p2,3),
+      `d de Cohen`    = round(d2,3),
+      `Taille d'effet`= as.character(mag2)
+    )
+}
+
+```
+
+
+
+```{r}
+# ─── AE : t-test seul
+knitr::kable(
+  table_ae_t,
+  align   = "lcccc",
+  caption = "Items AE (uniquement -test apparié)"
+)
+
+# ─── AE : t-test ou Wilcoxon
+knitr::kable(
+  table_ae_tw,
+  align   = "lccccc",
+  caption = "Items AE (t-test ou wilcoxon)"
+)
+```
+```{r}
+# ─── COP : t-test seul
+knitr::kable(
+  table_cop_t,
+  align   = "lcccc",
+  caption = "Items COP (t-test apparié)"
+)
+
+# ─── COP : t-test ou Wilcoxon
+knitr::kable(
+  table_cop_tw,
+  align   = "lccccc",
+  caption = "Items COP ((t-test ou wilcoxon)"
+)
 ```
 
 ```{r}
 ################################################################################
 # Plots AE et COP  (moyenne ± SD + étoile / NS)            
+#   ──────────────────────────────────────────────────────────────────────────
+#   Quatre figures sont générées et sauvegardées :
+#     1) plot_ae_t_mean   : AE — uniquement t-test apparié
+#     2) plot_ae_tw_mean  : AE — t-test ou Wilcoxon selon normalité
+#     3) plot_cop_t_mean  : COP — uniquement t-test apparié
+#     4) plot_cop_tw_mean : COP — t-test ou Wilcoxon selon normalité
 ################################################################################
-# ──────────────────────────────────────────────────────────────────────────────
-# 1. Passage en format long (si besoin) & harmonisation des noms
-# ──────────────────────────────────────────────────────────────────────────────
-if (!exists("data_long")) {
-  pre  <- pre  %>% mutate(Participant = row_number())
-  post <- post %>% mutate(Participant = row_number())
 
-  # valeurs_to = "Valeur" → on renomme plus bas
-  data_long <- bind_rows(
-    pre  %>% pivot_longer(-Participant,
-                          names_to  = "Variable",
-                          values_to = "Valeur") %>%
-               mutate(Temps = "Pré"),
-    post %>% pivot_longer(-Participant,
-                          names_to  = "Variable",
-                          values_to = "Valeur") %>%
-               mutate(Temps = "Post")
-  ) %>%
-    mutate(Variable = str_squish(Variable))
+# ──────────────────────────────────────────
+# (1) Fonctions utilitaires
+# ──────────────────────────────────────────
+extract_ms <- function(df, col, prefix) {
+  df %>%
+    tidyr::extract(
+      {{col}},
+      into  = c(paste0(prefix, "_moy"), paste0(prefix, "_sd")),
+      regex = "([0-9\\.]+) \\(([0-9\\.]+)\\)",
+      convert = TRUE
+    )
 }
 
-# Renomme seulement si la colonne existe (plus d’arrêt inopiné)
-if ("Valeur" %in% names(data_long)) {
-  data_long <- data_long %>% rename(Value = Valeur)
-}
-
-# ──────────────────────────────────────────────────────────────────────────────
-# 2. Résumé statistique : moyennes, SD, p-value, étoiles
-# ──────────────────────────────────────────────────────────────────────────────
-get_summary <- function(df_domain) {
-
-  stats <- df_domain %>%
-    group_by(Variable, Temps) %>%
-    summarise(moy = mean(.data$Value, na.rm = TRUE),
-              sd  =  sd(.data$Value,  na.rm = TRUE),
-              .groups = "drop")
-
-  pvals <- df_domain %>%
-    pivot_wider(names_from = Temps, values_from = Value) %>%
-    group_by(Variable) %>%
-    summarise(
-      p = tryCatch(
-            t.test(.data$Post, .data$Pré, paired = TRUE)$p.value,
-            error = function(e) NA_real_),
-      .groups = "drop"
-    ) %>%
-    mutate(sig = case_when(
-      is.na(p) ~ "NS",
-      p < .001 ~ "***",
-      p < .01  ~ "**",
-      p < .05  ~ "*",
-      TRUE     ~ "NS"
-    ))
-
-  left_join(stats, pvals, by = "Variable")
-}
-
-summary_ae  <- data_long %>%
-  filter(str_detect(Variable, "^AE"))  %>%
-  get_summary()
-
-summary_cop <- data_long %>%
-  filter(str_detect(Variable, "^COP")) %>%
-  get_summary() %>%
-  mutate(num = as.integer(str_extract(Variable, "\\d+"))) %>%
-  arrange(num) %>%
-  mutate(Variable = factor(Variable,
-                           levels = paste0("COP", sort(unique(num))))) %>%
-  select(-num)
-
-# ──────────────────────────────────────────────────────────────────────────────
-# 3. Fonction de tracé améliorée
-# ──────────────────────────────────────────────────────────────────────────────
 plot_domain <- function(df_summary, titre,
                         y_limits,
-                        col_pre = "steelblue", col_post = "firebrick") {
+                        dodge_width  = 0.6,
+                        bracket_rel  = 1,       # ← NEW
+                        col_pre = "steelblue",
+                        col_post = "firebrick") {
 
-  ## (a) Plus d’écart horizontal entre Pré et Post
-  pd <- position_dodge(width = 0.6)
+  ## ──────────────────────────────────────────
+  ## 0) Order items (COP1, COP2 …)
+  ## ──────────────────────────────────────────
+  var_levels <- if (all(grepl("^COP", df_summary$Variable))) {
+    v <- unique(df_summary$Variable)
+    v[order(as.numeric(sub("^COP", "", v)))]
+  } else unique(df_summary$Variable)
 
-  ## (b) Coordonnées des annotations
+  df_summary$Variable <- factor(df_summary$Variable, levels = var_levels)
+
+  ## 1) Dodge for Pré / Post
+  pd <- position_dodge(width = dodge_width)
+
+  ## ──────────────────────────────────────────
+  ## 2) Annotation coordinates (★ + bracket)
+  ##    “top” is fixed, bracket width = bracket_rel × dodge_width
+  ## ──────────────────────────────────────────
+  top_text <- y_limits[2] - diff(y_limits) * 0.02   # stars
+  top_line <- y_limits[2] - diff(y_limits) * 0.04   # brackets
+
   annot <- df_summary %>%
-    group_by(Variable) %>%
-    summarise(
-      y_text = y_limits[2] - diff(y_limits) * 0.04,  # texte
-      y_line = y_limits[2] - diff(y_limits) * 0.08,  # crochet
-      sig    = first(sig),
+    dplyr::group_by(Variable) %>%
+    dplyr::summarise(
+      y_text = top_text,
+      y_line = top_line,
+      sig    = dplyr::first(sig),
       .groups = "drop"
     )
 
-  var_levels <- levels(df_summary$Variable)
+  bw <- bracket_rel * dodge_width / 2        # half-width of bracket
+
   segment_df <- annot %>%
-    mutate(x_pos   = as.numeric(factor(Variable, levels = var_levels)),
-           x_left  = x_pos - pd$width / 2,
-           x_right = x_pos + pd$width / 2)
+    dplyr::mutate(
+      x_pos  = as.numeric(Variable),
+      x_left = x_pos - bw,
+      x_right= x_pos + bw
+    )
 
-  ## (c) Data « fantôme » pour la légende des p-values
-  legend_df <- tibble(
-    Variable = df_summary$Variable[1],
-    moy      = y_limits[1],
-    pv       = factor(c("*", "**", "***", "NS"),
-                      levels = c("*", "**", "***", "NS"))
-  )
-
-  ## (d) Construction du graphique
-  ggplot(df_summary,
-         aes(x = Variable, y = moy, colour = Temps)) +
-    geom_errorbar(aes(ymin = moy - sd, ymax = moy + sd),
-                  width = 0.25, position = pd, linewidth = 0.6) +
-    geom_point(size = 3.6, position = pd) +
-    geom_segment(data = segment_df,
-                 aes(x = x_left, xend = x_right,
-                     y = y_line, yend = y_line),
-                 inherit.aes = FALSE,
-                 linewidth = 0.8, colour = "black") +
-    geom_text(data = annot,
-              aes(x = Variable, y = y_text, label = sig),
-              colour = "black", size = 6, vjust = 0) +
-    geom_point(data = legend_df,
-               aes(x = Variable, y = moy, fill = pv),
-               alpha = 0, inherit.aes = FALSE) +
-    scale_colour_manual(values = c("Pré" = col_pre, "Post" = col_post),
-                        name   = "Temps") +
-    scale_fill_manual(
-      name   = NULL,
-      values = rep("white", 4),
-      labels = c("*   p < .05",
-                 "**  p < .01",
-                 "*** p < .001",
-                 "NS  non-significatif")
+  ## ──────────────────────────────────────────
+  ## 3) Build the plot
+  ## ──────────────────────────────────────────
+  ggplot2::ggplot(df_summary,
+                  ggplot2::aes(x = Variable, y = moy, colour = Temps)) +
+    ggplot2::geom_errorbar(
+      ggplot2::aes(ymin = moy - sd, ymax = moy + sd),
+      width = 0.25, position = pd, linewidth = 0.6
     ) +
-    guides(
-      colour = guide_legend(order = 1, label.hjust = 0),
-      fill   = guide_legend(order = 2,
-                            label.hjust = 0,
-                            override.aes = list(shape = NA, colour = NA))
+    ggplot2::geom_point(size = 3.6, position = pd) +
+    ggplot2::geom_segment(
+      data = segment_df,
+      ggplot2::aes(x = x_left, xend = x_right,
+                   y = y_line, yend = y_line),
+      inherit.aes = FALSE,
+      linewidth = 0.8, colour = "black"
     ) +
-    scale_y_continuous(
-      limits = y_limits,
-      breaks = seq(y_limits[1], y_limits[2], 1),                    # entiers
-      labels = scales::number_format(accuracy = 1),
-      expand = expansion(mult = c(0, 0.12))                         # marge haut
+    ggplot2::geom_text(
+      data = annot,
+      ggplot2::aes(x = Variable, y = y_text, label = sig),
+      colour = "black", size = 5
     ) +
-    labs(title = titre,
-         y     = "Moyenne ± ET",
-         x     = NULL) +
-    theme_minimal(base_size = 12) +
-    theme(
-      axis.text.x       = element_text(angle = 45, hjust = 1,
-                                       size = 14, face = "bold"),
-      legend.box        = "vertical",
-      legend.box.just   = "left",  # bloc aligné gauche
-      legend.text.align = 0,
-      legend.title.align= 0
+    ggplot2::scale_colour_manual(values = c("Pré" = col_pre,
+                                            "Post" = col_post),
+                                 name   = "Temps") +
+    ggplot2::scale_y_continuous(
+  limits = y_limits,
+  breaks = seq(y_limits[1], y_limits[2] - 1, 1),   # ⬅️  drop the max
+  labels = scales::number_format(accuracy = 1),
+  expand = ggplot2::expansion(mult = c(0, 0.12))
+) +
+    ggplot2::labs(
+      title   = titre,
+      y       = "Moyenne ± ET",
+      x       = NULL,
+      caption = "* p < .05    ** p < .01    *** p < .001    NS : non-significatif"
     ) +
-    coord_cartesian(clip = "off")  # garde les crochets même hors panneau
+  ggplot2::theme_minimal(base_size = 12) +          # base_size = hauteur « par défaut »
+ggplot2::theme(
+  plot.title   = ggplot2::element_text(size = 16, face = "bold"),
+  axis.title.y = ggplot2::element_text(size = 16),
+  axis.text.y = ggplot2::element_text(size = 16),
+  axis.text.x  = ggplot2::element_text(size = 18,        # ← taille des étiquettes
+                                       angle = 45,       # (conservez votre rotation)
+                                       hjust = 1,
+                                       face = "bold"),   # (optionnel : gras)
+  plot.caption = ggplot2::element_text(size = 12, hjust = 0,
+                                       margin = ggplot2::margin(t = 8))
+) +
+    ggplot2::coord_cartesian(clip = "off")
 }
 
-# ──────────────────────────────────────────────────────────────────────────────
-# 4. Création des figures et export PNG
-# ──────────────────────────────────────────────────────────────────────────────
-plot_ae_mean  <- plot_domain(summary_ae,
-                             titre    = "AE : Comparaison Pré vs Post",
-                             y_limits = c(0, 15))
 
-plot_cop_mean <- plot_domain(summary_cop,
-                             titre    = "COP : Comparaison Pré vs Post",
-                             y_limits = c(0, 7))
+# ──────────────────────────────────────────
+# (2) Tables « summary » avec étoiles
+# ──────────────────────────────────────────
+star_code <- function(p) dplyr::case_when(
+  p < 0.001 ~ "***",
+  p < 0.01  ~ "**",
+  p < 0.05  ~ "*",
+  TRUE      ~ "NS"
+)
 
-plot_ae_mean
-plot_cop_mean
+make_summary <- function(tbl){
+  tbl %>% 
+    dplyr::mutate(sig = star_code(p)) %>% 
+    extract_ms(`Pré (M±SD)`,  "pre") %>% 
+    extract_ms(`Post (M±SD)`, "post") %>% 
+    dplyr::select(Variable, pre_moy, pre_sd, post_moy, post_sd, sig) %>% 
+    tidyr::pivot_longer(
+      cols      = c(pre_moy, pre_sd, post_moy, post_sd),
+      names_to  = c("Temps", ".value"),
+      names_pattern = "(pre|post)_(.*)"
+    ) %>% 
+    dplyr::mutate(
+      Temps = dplyr::recode(Temps, pre = "Pré", post = "Post")
+    )
+}
 
-ggsave("pre_post_ae.png",  plot_ae_mean,
-       width = 40, height = 20, units = "cm", dpi = 300, bg = "white")
-ggsave("pre_post_cop.png", plot_cop_mean,
-       width = 40, height = 20, units = "cm", dpi = 300, bg = "white")
+summary_ae_t_tbl  <- make_summary(table_ae_t)
+summary_ae_tw_tbl <- make_summary(table_ae_tw)
+summary_cop_t_tbl <- make_summary(table_cop_t)
+summary_cop_tw_tbl<- make_summary(table_cop_tw)
+
+# ──────────────────────────────────────────
+# (3) Générer les 4 figures
+# ──────────────────────────────────────────
+plot_ae_t_mean <- plot_domain(summary_ae_t_tbl,
+                              titre       = "AE : Pré vs Post (t-test apparié)",
+                              y_limits    = c(0, 8))
+
+plot_ae_tw_mean <- plot_domain(summary_ae_tw_tbl,
+                               titre       = "AE : Pré vs Post (t-test ou Wilcoxon)",
+                               y_limits    = c(0, 8))
+
+plot_cop_t_mean <- plot_domain(summary_cop_t_tbl,
+                               titre       = "COP : Pré vs Post (t-test apparié)",
+                               y_limits    = c(0, 6))
+plot_cop_tw_mean<- plot_domain(summary_cop_tw_tbl,
+                               titre       = "COP : Pré vs Post (t-test ou Wilcoxon)",
+                               y_limits    = c(0, 6))
+
+# ──────────────────────────────────────────
+# (4) Afficher
+# ──────────────────────────────────────────
+print(plot_ae_t_mean)
+print(plot_ae_tw_mean)
+print(plot_cop_t_mean)
+print(plot_cop_tw_mean)
+
+# ──────────────────────────────────────────
+# (5) Sauvegarder
+# ──────────────────────────────────────────
+ggplot2::ggsave("pre_post_ae_t.png",  plot_ae_t_mean,
+                width = 40, height = 20, units = "cm", dpi = 300, bg = "white")
+ggplot2::ggsave("pre_post_ae_tw.png", plot_ae_tw_mean,
+                width = 40, height = 20, units = "cm", dpi = 300, bg = "white")
+ggplot2::ggsave("pre_post_cop_t.png",  plot_cop_t_mean,
+                width = 70, height = 20, units = "cm", dpi = 300, bg = "white")
+ggplot2::ggsave("pre_post_cop_tw.png", plot_cop_tw_mean,
+                width = 70, height = 20, units = "cm", dpi = 300, bg = "white")
+
 ```
 
 
