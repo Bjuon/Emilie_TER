@@ -566,6 +566,9 @@ plot_domain <- function(df_summary, titre,
 
   ## 1) Dodge for Pré / Post
   pd <- position_dodge(width = dodge_width)
+  
+  df_summary$Temps <- factor(df_summary$Temps, levels = c("Pré", "Post"))
+
 
   ## ──────────────────────────────────────────
   ## 2) Annotation coordinates (★ + bracket)
@@ -716,4 +719,299 @@ ggplot2::ggsave("pre_post_cop_tw.png", plot_cop_tw_mean,
 
 ```
 
+```{r}
+################################################################################
+# (3 bis) Histogram-style plots (means ± SD as vertical bars)                  #
+################################################################################
+
+# ──────────────────────────────────────────
+# 1) New plotting function
+# ──────────────────────────────────────────
+plot_domain_hist <- function(df_summary, titre,
+                             y_limits,
+                             dodge_width  = 0.6,
+                             bracket_rel  = 1,
+                             col_pre = "steelblue",
+                             col_post = "firebrick") {
+
+  ## 0) Preserve COP1, COP2 … ordering if present
+  var_levels <- if (all(grepl("^COP", df_summary$Variable))) {
+    v <- unique(df_summary$Variable)
+    v[order(as.numeric(sub("^COP", "", v)))]
+  } else unique(df_summary$Variable)
+  df_summary$Variable <- factor(df_summary$Variable, levels = var_levels)
+
+  ## 1) Dodging for Pré / Post
+  pd <- position_dodge(width = dodge_width)
+  df_summary$Temps <- factor(df_summary$Temps, levels = c("Pré", "Post"))
+
+  ## 2) Coordinates for significance brackets / stars
+  top_text <- y_limits[2] - diff(y_limits) * 0.02   # stars
+  top_line <- y_limits[2] - diff(y_limits) * 0.04   # brackets
+
+  annot <- df_summary |>
+    dplyr::group_by(Variable) |>
+    dplyr::summarise(
+      y_text = top_text,
+      y_line = top_line,
+      sig    = dplyr::first(sig),
+      .groups = "drop"
+    )
+
+  bw <- bracket_rel * dodge_width / 2
+  segment_df <- annot |>
+    dplyr::mutate(
+      x_pos  = as.numeric(Variable),
+      x_left = x_pos - bw,
+      x_right= x_pos + bw
+    )
+
+  ## 3) Build the plot  –– bars + error bars
+  ggplot2::ggplot(df_summary,
+                  ggplot2::aes(x = Variable, y = moy,
+                               fill = Temps, colour = Temps)) +
+    ggplot2::geom_col(position = pd,
+                      width     = dodge_width * 0.9,
+                      alpha     = 0.90) +
+   ggplot2::geom_errorbar(
+  ggplot2::aes(ymin = moy - sd, ymax = moy + sd),
+  width     = 0.25,
+  position  = pd,
+  linewidth = 0.6,
+  colour    = "black",      # ← NEW: fixed black error bars
+  show.legend = FALSE
+) +
+    ggplot2::geom_segment(
+      data = segment_df,
+      ggplot2::aes(x = x_left, xend = x_right,
+                   y = y_line, yend = y_line),
+      inherit.aes = FALSE,
+      linewidth   = 0.8, colour = "black"
+    ) +
+    ggplot2::geom_text(
+      data = annot,
+      ggplot2::aes(x = Variable, y = y_text, label = sig),
+      inherit.aes = FALSE,
+      colour      = "black", size = 5
+    ) +
+    ggplot2::scale_fill_manual(
+      values = c("Pré" = col_pre, "Post" = col_post),
+      name   = "Temps"
+    ) +
+    ggplot2::scale_colour_manual(
+      values = c("Pré" = col_pre, "Post" = col_post),
+      guide  = "none"
+    ) +
+    ggplot2::scale_y_continuous(
+      limits = y_limits,
+      breaks = seq(y_limits[1], y_limits[2] - 1, 1),
+      labels = scales::number_format(accuracy = 1),
+      expand = ggplot2::expansion(mult = c(0, 0.12))
+    ) +
+    ggplot2::labs(
+      title   = titre,
+      y       = "Moyenne ± ET",
+      x       = NULL,
+      caption = "* p < .05    ** p < .01    *** p < .001    NS : non-significatif"
+    ) +
+    ggplot2::theme_minimal(base_size = 12) +
+    ggplot2::theme(
+      plot.title   = ggplot2::element_text(size = 16, face = "bold"),
+      axis.title.y = ggplot2::element_text(size = 16),
+      axis.text.y  = ggplot2::element_text(size = 16),
+      axis.text.x  = ggplot2::element_text(size = 18, angle = 45, hjust = 1,
+                                           face = "bold"),
+      plot.caption = ggplot2::element_text(size = 12, hjust = 0,
+                                           margin = ggplot2::margin(t = 8))
+    ) +
+    ggplot2::coord_cartesian(clip = "off")
+}
+
+# ──────────────────────────────────────────
+# 2) Generate the four histogram plots
+# ──────────────────────────────────────────
+plot_ae_t_hist  <- plot_domain_hist(summary_ae_t_tbl,
+                                    titre    = "AE : Pré vs Post (t-test apparié) — Histogramme",
+                                    y_limits = c(0, 8))
+
+plot_ae_tw_hist <- plot_domain_hist(summary_ae_tw_tbl,
+                                    titre    = "AE : Pré vs Post (t-test ou Wilcoxon) — Histogramme",
+                                    y_limits = c(0, 8))
+
+plot_cop_t_hist <- plot_domain_hist(summary_cop_t_tbl,
+                                    titre    = "COP : Pré vs Post (t-test apparié) — Histogramme",
+                                    y_limits = c(0, 6))
+
+plot_cop_tw_hist<- plot_domain_hist(summary_cop_tw_tbl,
+                                    titre    = "COP : Pré vs Post (t-test ou Wilcoxon) — Histogramme",
+                                    y_limits = c(0, 6))
+
+# ──────────────────────────────────────────
+# 3) Display
+# ──────────────────────────────────────────
+print(plot_ae_t_hist)
+print(plot_ae_tw_hist)
+print(plot_cop_t_hist)
+print(plot_cop_tw_hist)
+
+# ──────────────────────────────────────────
+# 4) Save to disk (300 dpi PNG)
+# ──────────────────────────────────────────
+ggplot2::ggsave("pre_post_ae_t_hist.png",  plot_ae_t_hist,
+                width = 40, height = 20, units = "cm", dpi = 300, bg = "white")
+ggplot2::ggsave("pre_post_ae_tw_hist.png", plot_ae_tw_hist,
+                width = 40, height = 20, units = "cm", dpi = 300, bg = "white")
+ggplot2::ggsave("pre_post_cop_t_hist.png",  plot_cop_t_hist,
+                width = 70, height = 20, units = "cm", dpi = 300, bg = "white")
+ggplot2::ggsave("pre_post_cop_tw_hist.png", plot_cop_tw_hist,
+                width = 70, height = 20, units = "cm", dpi = 300, bg = "white")
+
+```
+
+
+```{r}
+################################################################################
+#  Trajectoires individuelles (solution 100 % numérique, plus d’erreur de scale)
+################################################################################
+library(tidyverse)
+
+# ──────────────────────────────────────────
+# 0) Réglage communs
+# ──────────────────────────────────────────
+dodge_width <- 0.6      # même espacement qu’avant
+
+# utilitaire : donne la position numérique d’un point Pré / Post
+offset_x <- function(var, temps, levels_vec, w = dodge_width) {
+  base <- match(var, levels_vec)
+  base + ifelse(temps == "Pré", -w/2, w/2)
+}
+
+# ──────────────────────────────────────────
+# 1) Préparer les tables « résumé » + indiv en version numérique
+# ──────────────────────────────────────────
+prep_summary_num <- function(tbl, levels_vec) {
+  tbl %>% 
+    mutate(x = offset_x(Variable, Temps, levels_vec))
+}
+
+prep_indiv_num <- function(df_long, levels_vec) {
+  df_long %>% 
+    mutate(x = offset_x(Variable, Temps, levels_vec))
+}
+
+## — AE
+levels_ae  <- summary_ae_t_tbl$Variable %>% unique()
+s_ae_t_num  <- prep_summary_num(summary_ae_t_tbl,  levels_ae)
+s_ae_tw_num <- prep_summary_num(summary_ae_tw_tbl, levels_ae)
+indiv_ae_num <- prep_indiv_num(indiv_ae, levels_ae)
+
+## — COP
+levels_cop <- summary_cop_t_tbl$Variable %>% unique()
+s_cop_t_num  <- prep_summary_num(summary_cop_t_tbl,  levels_cop)
+s_cop_tw_num <- prep_summary_num(summary_cop_tw_tbl, levels_cop)
+indiv_cop_num <- prep_indiv_num(indiv_cop, levels_cop)
+
+# ──────────────────────────────────────────
+# 2) Fonction générique : résumé + trajectoires
+# ──────────────────────────────────────────
+plot_numeric <- function(sum_tbl, indiv_tbl, levels_vec,
+                         titre, y_limits,
+                         col_pre = "steelblue", col_post = "firebrick") {
+
+  ## (a) récupère texte & brackets du résumé
+  top_text <- y_limits[2] - diff(y_limits) * 0.02
+  top_line <- y_limits[2] - diff(y_limits) * 0.04
+  bw       <- (dodge_width/2)          # half-width bracket
+
+  annot <- sum_tbl %>% 
+    group_by(Variable) %>% 
+    summarise(sig = first(sig), x_centre = first(x), .groups = "drop") %>% 
+    mutate(y_text = top_text, y_line = top_line,
+           x_left = x_centre - bw, x_right = x_centre + bw)
+
+  ggplot() +
+    ## 1) lignes individuelles
+    geom_line(data = indiv_tbl,
+              aes(x = x, y = Valeur,
+                  group = interaction(Participant, Variable)),
+              colour = "grey50", alpha = 0.6, linewidth = 0.6) +
+
+    ## 2) barres d’erreur + points moyenne ± ET
+    geom_errorbar(data = sum_tbl,
+                  aes(x = x, ymin = moy - sd, ymax = moy + sd,
+                      colour = Temps),
+                  width = 0.25, linewidth = 0.6) +
+    geom_point(data = sum_tbl,
+               aes(x = x, y = moy, colour = Temps),
+               size = 3.6) +
+
+    ## 3) accolades & étoiles
+    geom_segment(data = annot,
+                 aes(x = x_left, xend = x_right,
+                     y = y_line, yend = y_line),
+                 linewidth = 0.8, colour = "black") +
+    geom_text(data = annot,
+              aes(x = x_centre, y = y_text, label = sig),
+              size = 5) +
+
+    ## 4) échelles
+    scale_colour_manual(values = c("Pré" = col_pre,
+                                   "Post" = col_post),
+                        name = "Temps") +
+    scale_x_continuous(breaks = seq_along(levels_vec),
+                       labels = levels_vec,
+                       expand = expansion(mult = c(0.05, 0.05))) +
+    scale_y_continuous(limits = y_limits,
+                       breaks = seq(y_limits[1], y_limits[2] - 1, 1),
+                       labels = scales::number_format(accuracy = 1),
+                       expand = expansion(mult = c(0, 0.12))) +
+
+    ## 5) titres & thèmes (identiques)
+    labs(title   = titre,
+         y       = "Moyenne ± ET",
+         x       = NULL,
+         caption = "* p < .05    ** p < .01    *** p < .001    NS : non-significatif") +
+    theme_minimal(base_size = 12) +
+    theme(
+      plot.title   = element_text(size = 16, face = "bold"),
+      axis.title.y = element_text(size = 16),
+      axis.text.y  = element_text(size = 16),
+      axis.text.x  = element_text(size = 18, angle = 45,
+                                  hjust = 1, face = "bold"),
+      plot.caption = element_text(size = 12, hjust = 0,
+                                  margin = margin(t = 8))
+    ) +
+    coord_cartesian(clip = "off")
+}
+
+# ──────────────────────────────────────────
+# 3) Générer les 4 figures
+# ──────────────────────────────────────────
+plot_ae_t_indiv   <- plot_numeric(s_ae_t_num,  indiv_ae_num,  levels_ae,
+                                  "AE : Pré vs Post (t-test apparié)", c(0, 8))
+plot_ae_tw_indiv  <- plot_numeric(s_ae_tw_num, indiv_ae_num,  levels_ae,
+                                  "AE : Pré vs Post (t-test ou Wilcoxon)", c(0, 8))
+plot_cop_t_indiv  <- plot_numeric(s_cop_t_num, indiv_cop_num, levels_cop,
+                                  "COP : Pré vs Post (t-test apparié)", c(0, 6))
+plot_cop_tw_indiv <- plot_numeric(s_cop_tw_num,indiv_cop_num, levels_cop,
+                                  "COP : Pré vs Post (t-test ou Wilcoxon)", c(0, 6))
+
+print(plot_ae_t_indiv)
+print(plot_ae_tw_indiv)
+print(plot_cop_t_indiv)
+print(plot_cop_tw_indiv)
+
+# ──────────────────────────────────────────
+# 4) Sauvegarde avec suffixe « _indiv »
+# ──────────────────────────────────────────
+ggplot2::ggsave("pre_post_ae_t_indiv.png",  plot_ae_t_indiv,
+                width = 40, height = 20, units = "cm", dpi = 300, bg = "white")
+ggplot2::ggsave("pre_post_ae_tw_indiv.png", plot_ae_tw_indiv,
+                width = 40, height = 20, units = "cm", dpi = 300, bg = "white")
+ggplot2::ggsave("pre_post_cop_t_indiv.png",  plot_cop_t_indiv,
+                width = 70, height = 20, units = "cm", dpi = 300, bg = "white")
+ggplot2::ggsave("pre_post_cop_tw_indiv.png", plot_cop_tw_indiv,
+                width = 70, height = 20, units = "cm", dpi = 300, bg = "white")
+
+```
 
